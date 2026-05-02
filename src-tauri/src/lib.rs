@@ -213,18 +213,22 @@ fn list_notes(state: tauri::State<AppState>) -> Result<Vec<Note>, String> {
 #[tauri::command]
 fn search_notes(state: tauri::State<AppState>, query: String) -> Result<Vec<Note>, String> {
     let conn = state.conn.lock().map_err(|_| "lock error".to_string())?;
-    let like = format!("%{}%", query.trim());
+    let q = query.trim().to_lowercase();
+    let like = format!("%{}%", q);
     let mut stmt = conn
         .prepare(
             "SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at
              FROM notes
-             WHERE title LIKE ?1 OR content LIKE ?1
-             ORDER BY pinned DESC, updated_at DESC",
+             WHERE lower(title) LIKE ?1 OR lower(content) LIKE ?1
+             ORDER BY
+               CASE WHEN lower(title) LIKE ?2 THEN 0 ELSE 1 END,
+               pinned DESC,
+               updated_at DESC",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map([like], row_to_note)
+        .query_map(params![like, like], row_to_note)
         .map_err(|e| e.to_string())?;
     let notes: Result<Vec<Note>, _> = rows.collect();
     notes.map_err(|e| e.to_string())
