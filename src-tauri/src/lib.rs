@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::Emitter;
 use tauri::Manager;
 
 struct AppState {
@@ -421,6 +424,21 @@ fn export_notes(
     Ok(())
 }
 
+#[tauri::command]
+fn quick_note(state: tauri::State<AppState>) -> Result<Note, String> {
+    create_note(
+        state,
+        NewNote {
+            parent_id: None,
+            title: format!("Quick Note {}", Utc::now().format("%Y-%m-%d %H:%M")),
+            content: String::new(),
+            is_markdown: true,
+            pinned: false,
+            color: Some("#fff9c4".to_string()),
+        },
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -442,6 +460,36 @@ pub fn run() {
                 current_db_path: Mutex::new(initial_path),
             });
 
+            let quick = MenuItem::with_id(app, "quick_note", "Quick Note", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let show = MenuItem::with_id(app, "show_ticknest", "Show TickNest", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let quit = MenuItem::with_id(app, "quit_ticknest", "Quit", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let menu = Menu::with_items(app, &[&quick, &show, &quit]).map_err(|e| e.to_string())?;
+
+            let app_handle = app.handle().clone();
+            TrayIconBuilder::new()
+                .menu(&menu)
+                .on_menu_event(move |tray, event| {
+                    let id = event.id.as_ref();
+                    if id == "quick_note" {
+                        let _ = quick_note(app_handle.state::<AppState>());
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.emit("quick-note-created", true);
+                        }
+                    } else if id == "show_ticknest" {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    } else if id == "quit_ticknest" {
+                        tray.app_handle().exit(0);
+                    }
+                })
+                .build(app)
+                .map_err(|e| e.to_string())?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -454,6 +502,7 @@ pub fn run() {
             update_settings,
             set_storage_mode,
             export_notes,
+            quick_note,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

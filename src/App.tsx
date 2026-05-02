@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import './App.css';
 
 type Note = {
@@ -87,6 +88,17 @@ function App() {
   useEffect(() => {
     void refreshNotes();
     void loadSettings();
+
+    let unlisten: (() => void) | undefined;
+    void listen('quick-note-created', () => {
+      void refreshNotes();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
   }, []);
 
   useEffect(() => {
