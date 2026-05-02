@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::Emitter;
 use tauri::Manager;
@@ -540,6 +540,33 @@ pub fn run() {
                 .map_err(|e| e.to_string())?;
             let menu = Menu::with_items(app, &[&quick, &show, &quit]).map_err(|e| e.to_string())?;
 
+            let app_settings =
+                MenuItem::with_id(app, "app_settings", "Settings", true, None::<&str>)
+                    .map_err(|e| e.to_string())?;
+            let app_new = MenuItem::with_id(app, "app_new_note", "New Note", true, Some("CmdOrCtrl+N"))
+                .map_err(|e| e.to_string())?;
+            let app_next =
+                MenuItem::with_id(app, "app_next_note", "Next Note", true, Some("CmdOrCtrl+]"))
+                    .map_err(|e| e.to_string())?;
+            let app_prev =
+                MenuItem::with_id(app, "app_prev_note", "Previous Note", true, Some("CmdOrCtrl+["))
+                    .map_err(|e| e.to_string())?;
+            let app_help = MenuItem::with_id(app, "app_help", "Help", true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+            let app_submenu =
+                Submenu::with_items(
+                    app,
+                    "TickNest",
+                    true,
+                    &[&app_new, &app_prev, &app_next, &app_settings, &app_help],
+                )
+                    .map_err(|e| e.to_string())?;
+            let help_submenu =
+                Submenu::with_items(app, "Help", true, &[&app_help]).map_err(|e| e.to_string())?;
+            let app_menu =
+                Menu::with_items(app, &[&app_submenu, &help_submenu]).map_err(|e| e.to_string())?;
+            app.set_menu(app_menu).map_err(|e| e.to_string())?;
+
             let app_handle = app.handle().clone();
             TrayIconBuilder::new()
                 .menu(&menu)
@@ -563,6 +590,20 @@ pub fn run() {
                 .map_err(|e| e.to_string())?;
 
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            let id = event.id.as_ref();
+            if id == "app_settings" {
+                let _ = app.emit("menu-open-settings", true);
+            } else if id == "app_help" {
+                let _ = app.emit("menu-open-help", true);
+            } else if id == "app_new_note" {
+                let _ = app.emit("menu-new-note", true);
+            } else if id == "app_next_note" {
+                let _ = app.emit("menu-next-note", true);
+            } else if id == "app_prev_note" {
+                let _ = app.emit("menu-prev-note", true);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             create_note,

@@ -22,10 +22,11 @@ body {
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
+  background: #f4f4f6;
 }
 
 .mac-menubar {
@@ -43,62 +44,80 @@ body {
 .mac-menubar:active { cursor: grabbing; }
 
 .menu-left,
-.menu-right {
+.menu-right,
+.settings-bar {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.menu-btn,
+.menu-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.note-count {
+  font-size: 11px;
+  color: rgba(0,0,0,0.6);
+}
+
+.settings-bar {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255,255,255,0.55);
+}
+
 .menu-select,
-.menu-input,
-.shortcut,
 input[type='color'],
 .small-range {
-  -webkit-app-region: no-drag;
-}
-
-.menu-btn {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--glass);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 10px;
-}
-
-.menu-btn.danger {
-  color: #b42318;
-}
-
-.menu-select,
-.menu-input,
-.shortcut {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255,255,255,0.9);
   font-size: 12px;
   padding: 5px 8px;
+  -webkit-app-region: no-drag;
 }
-
-.menu-select { min-width: 122px; }
-.menu-input { width: 140px; }
-.shortcut { width: 100px; text-align: center; }
 
 input[type='color'] {
   width: 28px;
   height: 24px;
   padding: 0;
-  border: 1px solid var(--line);
   border-radius: 6px;
   background: transparent;
 }
 
-.small-range { width: 72px; }
+.small-range { width: 80px; }
 
-.note-content {
+.notes-row {
   min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+}
+
+.note-card {
+  flex: 0 0 340px;
+  height: calc(100% - 4px);
+  min-height: 260px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 12px;
   display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.note-card.active {
+  outline: 2px solid rgba(58, 126, 255, 0.55);
+}
+
+.note-title {
+  border: none;
+  background: transparent;
+  margin: 8px 10px 0;
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .sticky-body {
@@ -107,11 +126,12 @@ input[type='color'] {
   resize: none;
   width: 100%;
   height: 100%;
-  padding: 12px;
-  line-height: 1.46;
+  padding: 8px 10px 12px;
+  line-height: 1.5;
 }
 
-.sticky-body:focus { outline: none; }
+.sticky-body:focus,
+.note-title:focus { outline: none; }
 
 .sticky-status {
   min-height: 16px;

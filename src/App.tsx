@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import './App.css';
 
 type Note = {
@@ -22,10 +23,6 @@ type Note = {
   updated_at: string;
 };
 
-type ShortcutConfig = {
-  newNote: string;
-};
-
 const DEFAULTS = {
   color: '#fff7b8',
   text_color: '#1d1d1f',
@@ -37,31 +34,12 @@ const DEFAULTS = {
 };
 
 const FONT_OPTIONS = ['SF Pro Text', 'Avenir Next', 'Menlo', 'Noteworthy'];
-const SHORTCUTS_KEY = 'ticknest.shortcuts.v1';
-const DEFAULT_SHORTCUTS: ShortcutConfig = { newNote: 'Meta+N' };
-
-function parseShortcut(value: string): string[] {
-  return value.split('+').map((p) => p.trim().toLowerCase()).filter(Boolean);
-}
-
-function eventMatchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
-  const parts = parseShortcut(shortcut);
-  const wantsMeta = parts.includes('meta') || parts.includes('cmd') || parts.includes('command');
-  const wantsCtrl = parts.includes('ctrl') || parts.includes('control');
-  const wantsShift = parts.includes('shift');
-  const wantsAlt = parts.includes('alt') || parts.includes('option');
-  if (e.metaKey !== wantsMeta || e.ctrlKey !== wantsCtrl || e.shiftKey !== wantsShift || e.altKey !== wantsAlt) return false;
-  const keyPart = parts.find((p) => !['meta', 'cmd', 'command', 'ctrl', 'control', 'shift', 'alt', 'option'].includes(p));
-  return !!keyPart && e.key.toLowerCase() === keyPart;
-}
 
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
   const [status, setStatus] = useState('');
-  const [shortcuts, setShortcuts] = useState<ShortcutConfig>(DEFAULT_SHORTCUTS);
+  const [showSettings, setShowSettings] = useState(false);
 
   const activeNote = useMemo(() => notes.find((n) => n.id === activeId) ?? null, [notes, activeId]);
 
@@ -74,10 +52,11 @@ function App() {
   }
 
   async function createNote() {
+    const label = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const created = await invoke<Note>('create_note', {
       payload: {
         parent_id: null,
-        title: `Note ${notes.length + 1}`,
+        title: `New Note ${label}`,
         content: '',
         is_markdown: true,
         pinned: false,
@@ -94,54 +73,46 @@ function App() {
     });
     setNotes((prev) => [created, ...prev]);
     setActiveId(created.id);
-    setTitle(created.title);
-    setContent(created.content);
     setStatus('New note created');
   }
 
-  async function deleteActiveNote() {
-    if (!activeNote) return;
-    await invoke('delete_note', { id: activeNote.id });
-    const remaining = notes.filter((n) => n.id !== activeNote.id);
-    setNotes(remaining);
-    if (remaining.length === 0) {
-      setActiveId(null);
-      setTitle('');
-      setContent('');
-      setStatus('Note deleted');
-      await createNote();
-      return;
-    }
-    const next = remaining[0];
-    setActiveId(next.id);
-    setTitle(next.title);
-    setContent(next.content);
-    setStatus('Note deleted');
-  }
-
-  async function persist(next: Partial<Note>, nextTitle = title, nextContent = content) {
-    if (!activeNote) return;
+  async function persist(note: Note, patch: Partial<Note>) {
     const updated = await invoke<Note>('update_note', {
       payload: {
-        id: activeNote.id,
+        id: note.id,
         parent_id: null,
-        title: nextTitle,
-        content: nextContent,
+        title: patch.title ?? note.title,
+        content: patch.content ?? note.content,
         is_markdown: true,
-        pinned: activeNote.pinned,
-        color: next.color ?? activeNote.color ?? DEFAULTS.color,
-        text_color: next.text_color ?? activeNote.text_color ?? DEFAULTS.text_color,
-        note_opacity: next.note_opacity ?? activeNote.note_opacity ?? DEFAULTS.note_opacity,
-        font_family: next.font_family ?? activeNote.font_family ?? DEFAULTS.font_family,
-        font_size: next.font_size ?? activeNote.font_size ?? DEFAULTS.font_size,
-        shadow_level: next.shadow_level ?? activeNote.shadow_level ?? DEFAULTS.shadow_level,
-        tilt_deg: next.tilt_deg ?? activeNote.tilt_deg ?? DEFAULTS.tilt_deg,
-        pos_x: activeNote.pos_x,
-        pos_y: activeNote.pos_y,
+        pinned: note.pinned,
+        color: patch.color ?? note.color ?? DEFAULTS.color,
+        text_color: patch.text_color ?? note.text_color ?? DEFAULTS.text_color,
+        note_opacity: patch.note_opacity ?? note.note_opacity ?? DEFAULTS.note_opacity,
+        font_family: patch.font_family ?? note.font_family ?? DEFAULTS.font_family,
+        font_size: patch.font_size ?? note.font_size ?? DEFAULTS.font_size,
+        shadow_level: patch.shadow_level ?? note.shadow_level ?? DEFAULTS.shadow_level,
+        tilt_deg: patch.tilt_deg ?? note.tilt_deg ?? DEFAULTS.tilt_deg,
+        pos_x: note.pos_x,
+        pos_y: note.pos_y,
       },
     });
+
     setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
     setStatus('Saved');
+  }
+
+  function goPrevNote() {
+    if (!activeNote || notes.length < 2) return;
+    const idx = notes.findIndex((n) => n.id === activeNote.id);
+    const nextIdx = idx <= 0 ? notes.length - 1 : idx - 1;
+    setActiveId(notes[nextIdx].id);
+  }
+
+  function goNextNote() {
+    if (!activeNote || notes.length < 2) return;
+    const idx = notes.findIndex((n) => n.id === activeNote.id);
+    const nextIdx = idx >= notes.length - 1 ? 0 : idx + 1;
+    setActiveId(notes[nextIdx].id);
   }
 
   useEffect(() => {
@@ -149,77 +120,115 @@ function App() {
       const existing = await invoke<Note[]>('list_notes');
       if (existing.filter((n) => n.parent_id == null).length === 0) await createNote();
     });
-    const stored = localStorage.getItem(SHORTCUTS_KEY);
-    if (stored) {
-      try { setShortcuts({ ...DEFAULT_SHORTCUTS, ...JSON.parse(stored) }); } catch { setShortcuts(DEFAULT_SHORTCUTS); }
-    }
+
+    let unlistenSettings: (() => void) | undefined;
+    let unlistenHelp: (() => void) | undefined;
+    let unlistenNew: (() => void) | undefined;
+    let unlistenNext: (() => void) | undefined;
+    let unlistenPrev: (() => void) | undefined;
+
+    void listen('menu-open-settings', () => setShowSettings((v) => !v)).then((f) => {
+      unlistenSettings = f;
+    });
+    void listen('menu-open-help', () => setStatus('Help: Cmd+N new note. All notes stay visible side-by-side.')).then((f) => {
+      unlistenHelp = f;
+    });
+    void listen('menu-new-note', () => {
+      void createNote();
+    }).then((f) => {
+      unlistenNew = f;
+    });
+    void listen('menu-next-note', () => goNextNote()).then((f) => {
+      unlistenNext = f;
+    });
+    void listen('menu-prev-note', () => goPrevNote()).then((f) => {
+      unlistenPrev = f;
+    });
+
+    return () => {
+      if (unlistenSettings) unlistenSettings();
+      if (unlistenHelp) unlistenHelp();
+      if (unlistenNew) unlistenNew();
+      if (unlistenNext) unlistenNext();
+      if (unlistenPrev) unlistenPrev();
+    };
   }, []);
 
   useEffect(() => {
-    if (!activeNote) return;
-    setTitle(activeNote.title);
-    setContent(activeNote.content);
-  }, [activeNote?.id]);
-
-  useEffect(() => {
-    if (!activeNote) return;
-    const timer = setTimeout(() => {
-      if (title !== activeNote.title || content !== activeNote.content) void persist({}, title, content);
-    }, 220);
-    return () => clearTimeout(timer);
-  }, [title, content, activeNote?.id]);
-
-  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (eventMatchesShortcut(e, shortcuts.newNote)) {
+      if (e.metaKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         void createNote();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shortcuts, notes.length]);
-
-  function updateShortcut(value: string) {
-    const next = { newNote: value };
-    setShortcuts(next);
-    localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(next));
-    setStatus('Shortcut updated');
-  }
+  }, [notes.length]);
 
   const bgColor = activeNote?.color ?? DEFAULTS.color;
   const textColor = activeNote?.text_color ?? DEFAULTS.text_color;
-  const opacity = activeNote?.note_opacity ?? DEFAULTS.note_opacity;
   const fontFamily = activeNote?.font_family ?? DEFAULTS.font_family;
   const fontSize = activeNote?.font_size ?? DEFAULTS.font_size;
-  const shadowLevel = activeNote?.shadow_level ?? DEFAULTS.shadow_level;
 
   return (
-    <main className="sticky-window" style={{ background: bgColor, color: textColor, opacity, boxShadow: `0 18px 40px rgba(0,0,0,${shadowLevel})` }}>
+    <main className="sticky-window">
       <header className="mac-menubar" data-tauri-drag-region>
         <div className="menu-left">
-          <button className="menu-btn" onClick={() => void createNote()} title={shortcuts.newNote}>New</button>
-          <select className="menu-select" value={activeId ?? ''} onChange={(e) => setActiveId(Number(e.target.value))}>
-            {notes.map((n) => <option key={n.id} value={n.id}>{n.title || `Note ${n.id}`}</option>)}
-          </select>
-          <input className="menu-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
+          <span className="menu-title">Sticky Notes</span>
         </div>
         <div className="menu-right">
-          <button className="menu-btn danger" onClick={() => void deleteActiveNote()} title="Delete note">
-            🗑
-          </button>
-          <input type="color" value={bgColor} onChange={(e) => void persist({ color: e.target.value })} />
-          <input type="color" value={textColor} onChange={(e) => void persist({ text_color: e.target.value })} />
-          <select className="menu-select" value={fontFamily} onChange={(e) => void persist({ font_family: e.target.value })}>
-            {FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}
-          </select>
-          <input className="small-range" type="range" min="13" max="26" step="1" value={fontSize} onChange={(e) => void persist({ font_size: Number(e.target.value) })} />
-          <input className="shortcut" value={shortcuts.newNote} onChange={(e) => updateShortcut(e.target.value)} title="New note shortcut" />
+          <span className="note-count">{notes.length} notes</span>
         </div>
       </header>
 
-      <section className="note-content">
-        <textarea className="sticky-body" style={{ color: textColor, fontFamily, fontSize: `${fontSize}px` }} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Start typing..." />
+      {showSettings && activeNote && (
+        <section className="settings-bar">
+          <input type="color" value={bgColor} onChange={(e) => void persist(activeNote, { color: e.target.value })} title="Note color" />
+          <input type="color" value={textColor} onChange={(e) => void persist(activeNote, { text_color: e.target.value })} title="Text color" />
+          <select className="menu-select" value={fontFamily} onChange={(e) => void persist(activeNote, { font_family: e.target.value })}>
+            {FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}
+          </select>
+          <input className="small-range" type="range" min="13" max="26" step="1" value={fontSize} onChange={(e) => void persist(activeNote, { font_size: Number(e.target.value) })} title="Font size" />
+        </section>
+      )}
+
+      <section className="notes-row">
+        {notes.map((note) => {
+          const noteBg = note.color ?? DEFAULTS.color;
+          const noteText = note.text_color ?? DEFAULTS.text_color;
+          const noteFont = note.font_family ?? DEFAULTS.font_family;
+          const noteSize = note.font_size ?? DEFAULTS.font_size;
+          const noteOpacity = note.note_opacity ?? DEFAULTS.note_opacity;
+          const noteShadow = note.shadow_level ?? DEFAULTS.shadow_level;
+
+          return (
+            <article
+              key={note.id}
+              className={`note-card ${note.id === activeId ? 'active' : ''}`}
+              style={{
+                background: noteBg,
+                color: noteText,
+                opacity: noteOpacity,
+                boxShadow: `0 12px 26px rgba(0,0,0,${noteShadow})`,
+              }}
+              onClick={() => setActiveId(note.id)}
+            >
+              <input
+                className="note-title"
+                value={note.title}
+                onChange={(e) => void persist(note, { title: e.target.value })}
+                placeholder="Title"
+              />
+              <textarea
+                className="sticky-body"
+                style={{ color: noteText, fontFamily: noteFont, fontSize: `${noteSize}px` }}
+                value={note.content}
+                onChange={(e) => void persist(note, { content: e.target.value })}
+                placeholder="Start typing full note..."
+              />
+            </article>
+          );
+        })}
       </section>
 
       <footer className="sticky-status">{status}</footer>
