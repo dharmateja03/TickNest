@@ -241,6 +241,7 @@ function App() {
       </aside>
 
       <section className="content">
+        <p className="local-only">Local-only notes. No cloud sync is used.</p>
         <div className="toolbar">
           <button onClick={() => setShowExport(true)}>Export</button>
           <button onClick={() => setIsPreview((p) => !p)}>

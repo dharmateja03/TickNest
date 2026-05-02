@@ -34,6 +34,7 @@
 .note-item.active { background: #e8dbc2; }
 
 .content { padding: 16px; }
+.local-only { margin-bottom: 8px; font-size: 13px; color: #6a6256; }
 .toolbar { display: flex; gap: 8px; align-items: center; }
 .row { display: flex; gap: 8px; align-items: center; }
 .editor { min-height: 55vh; }
