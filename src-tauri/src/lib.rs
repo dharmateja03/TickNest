@@ -23,6 +23,14 @@ struct Note {
     is_markdown: bool,
     pinned: bool,
     color: Option<String>,
+    text_color: Option<String>,
+    note_opacity: Option<f64>,
+    font_family: Option<String>,
+    font_size: Option<f64>,
+    shadow_level: Option<f64>,
+    tilt_deg: Option<f64>,
+    pos_x: Option<f64>,
+    pos_y: Option<f64>,
     created_at: String,
     updated_at: String,
 }
@@ -35,6 +43,14 @@ struct NewNote {
     is_markdown: bool,
     pinned: bool,
     color: Option<String>,
+    text_color: Option<String>,
+    note_opacity: Option<f64>,
+    font_family: Option<String>,
+    font_size: Option<f64>,
+    shadow_level: Option<f64>,
+    tilt_deg: Option<f64>,
+    pos_x: Option<f64>,
+    pos_y: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -46,6 +62,14 @@ struct UpdateNote {
     is_markdown: bool,
     pinned: bool,
     color: Option<String>,
+    text_color: Option<String>,
+    note_opacity: Option<f64>,
+    font_family: Option<String>,
+    font_size: Option<f64>,
+    shadow_level: Option<f64>,
+    tilt_deg: Option<f64>,
+    pos_x: Option<f64>,
+    pos_y: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,6 +101,14 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           is_markdown INTEGER NOT NULL DEFAULT 1,
           pinned INTEGER NOT NULL DEFAULT 0,
           color TEXT,
+          text_color TEXT,
+          note_opacity REAL,
+          font_family TEXT,
+          font_size REAL,
+          shadow_level REAL,
+          tilt_deg REAL,
+          pos_x REAL,
+          pos_y REAL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -91,6 +123,14 @@ fn init_db(conn: &Connection) -> Result<(), String> {
         ",
     )
     .map_err(|e| e.to_string())?;
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN pos_x REAL", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN pos_y REAL", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN text_color TEXT", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN note_opacity REAL", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN font_family TEXT", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN font_size REAL", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN shadow_level REAL", []);
+    let _ = conn.execute("ALTER TABLE notes ADD COLUMN tilt_deg REAL", []);
 
     conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('storage_mode', 'sandbox')", [])
         .map_err(|e| e.to_string())?;
@@ -126,8 +166,16 @@ fn row_to_note(row: &rusqlite::Row<'_>) -> rusqlite::Result<Note> {
         is_markdown: row.get::<_, i64>(4)? == 1,
         pinned: row.get::<_, i64>(5)? == 1,
         color: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        text_color: row.get(7)?,
+        note_opacity: row.get(8)?,
+        font_family: row.get(9)?,
+        font_size: row.get(10)?,
+        shadow_level: row.get(11)?,
+        tilt_deg: row.get(12)?,
+        pos_x: row.get(13)?,
+        pos_y: row.get(14)?,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
     })
 }
 
@@ -136,8 +184,8 @@ fn create_note(state: tauri::State<AppState>, payload: NewNote) -> Result<Note, 
     let conn = state.conn.lock().map_err(|_| "lock error".to_string())?;
     let ts = now_iso();
     conn.execute(
-        "INSERT INTO notes (parent_id, title, content, is_markdown, pinned, color, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO notes (parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             payload.parent_id,
             payload.title,
@@ -145,6 +193,14 @@ fn create_note(state: tauri::State<AppState>, payload: NewNote) -> Result<Note, 
             if payload.is_markdown { 1 } else { 0 },
             if payload.pinned { 1 } else { 0 },
             payload.color,
+            payload.text_color,
+            payload.note_opacity,
+            payload.font_family,
+            payload.font_size,
+            payload.shadow_level,
+            payload.tilt_deg,
+            payload.pos_x,
+            payload.pos_y,
             ts,
             ts
         ],
@@ -153,7 +209,7 @@ fn create_note(state: tauri::State<AppState>, payload: NewNote) -> Result<Note, 
 
     let id = conn.last_insert_rowid();
     let mut stmt = conn
-        .prepare("SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at FROM notes WHERE id = ?1")
+        .prepare("SELECT id, parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at FROM notes WHERE id = ?1")
         .map_err(|e| e.to_string())?;
     stmt.query_row([id], row_to_note).map_err(|e| e.to_string())
 }
@@ -163,8 +219,8 @@ fn update_note(state: tauri::State<AppState>, payload: UpdateNote) -> Result<Not
     let conn = state.conn.lock().map_err(|_| "lock error".to_string())?;
     conn.execute(
         "UPDATE notes
-         SET parent_id = ?1, title = ?2, content = ?3, is_markdown = ?4, pinned = ?5, color = ?6, updated_at = ?7
-         WHERE id = ?8",
+         SET parent_id = ?1, title = ?2, content = ?3, is_markdown = ?4, pinned = ?5, color = ?6, text_color = ?7, note_opacity = ?8, font_family = ?9, font_size = ?10, shadow_level = ?11, tilt_deg = ?12, pos_x = ?13, pos_y = ?14, updated_at = ?15
+         WHERE id = ?16",
         params![
             payload.parent_id,
             payload.title,
@@ -172,6 +228,14 @@ fn update_note(state: tauri::State<AppState>, payload: UpdateNote) -> Result<Not
             if payload.is_markdown { 1 } else { 0 },
             if payload.pinned { 1 } else { 0 },
             payload.color,
+            payload.text_color,
+            payload.note_opacity,
+            payload.font_family,
+            payload.font_size,
+            payload.shadow_level,
+            payload.tilt_deg,
+            payload.pos_x,
+            payload.pos_y,
             now_iso(),
             payload.id
         ],
@@ -179,7 +243,7 @@ fn update_note(state: tauri::State<AppState>, payload: UpdateNote) -> Result<Not
     .map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at FROM notes WHERE id = ?1")
+        .prepare("SELECT id, parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at FROM notes WHERE id = ?1")
         .map_err(|e| e.to_string())?;
     stmt.query_row([payload.id], row_to_note).map_err(|e| e.to_string())
 }
@@ -199,7 +263,7 @@ fn list_notes(state: tauri::State<AppState>) -> Result<Vec<Note>, String> {
     let conn = state.conn.lock().map_err(|_| "lock error".to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at
+            "SELECT id, parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at
              FROM notes
              ORDER BY pinned DESC, updated_at DESC",
         )
@@ -220,7 +284,7 @@ fn search_notes(state: tauri::State<AppState>, query: String) -> Result<Vec<Note
     let like = format!("%{}%", q);
     let mut stmt = conn
         .prepare(
-            "SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at
+            "SELECT id, parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at
              FROM notes
              WHERE lower(title) LIKE ?1 OR lower(content) LIKE ?1
              ORDER BY
@@ -378,7 +442,7 @@ fn export_notes(
     for note_id in selection.note_ids {
         let note: Note = conn
             .query_row(
-                "SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at FROM notes WHERE id = ?1",
+                "SELECT id, parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at FROM notes WHERE id = ?1",
                 [note_id],
                 row_to_note,
             )
@@ -394,7 +458,7 @@ fn export_notes(
 
         let mut child_stmt = conn
             .prepare(
-                "SELECT id, parent_id, title, content, is_markdown, pinned, color, created_at, updated_at
+                "SELECT id, parent_id, title, content, is_markdown, pinned, color, text_color, note_opacity, font_family, font_size, shadow_level, tilt_deg, pos_x, pos_y, created_at, updated_at
                  FROM notes WHERE parent_id = ?1 ORDER BY updated_at DESC",
             )
             .map_err(|e| e.to_string())?;
@@ -435,6 +499,14 @@ fn quick_note(state: tauri::State<AppState>) -> Result<Note, String> {
             is_markdown: true,
             pinned: false,
             color: Some("#fff9c4".to_string()),
+            text_color: Some("#2f2a19".to_string()),
+            note_opacity: Some(1.0),
+            font_family: Some("Marker Felt".to_string()),
+            font_size: Some(16.0),
+            shadow_level: Some(0.35),
+            tilt_deg: Some(0.0),
+            pos_x: None,
+            pos_y: None,
         },
     )
 }

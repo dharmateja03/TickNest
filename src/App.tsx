@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import './App.css';
 
 type Note = {
@@ -11,403 +10,219 @@ type Note = {
   is_markdown: boolean;
   pinned: boolean;
   color: string | null;
+  text_color: string | null;
+  note_opacity: number | null;
+  font_family: string | null;
+  font_size: number | null;
+  shadow_level: number | null;
+  tilt_deg: number | null;
+  pos_x: number | null;
+  pos_y: number | null;
   created_at: string;
   updated_at: string;
 };
 
-type Settings = {
-  storage_mode: string;
-  custom_vault_path?: string;
-  export_include_metadata: boolean;
-  markdown_preview_default: boolean;
+type ShortcutConfig = {
+  newNote: string;
 };
 
-const defaultNewNote = {
-  title: '',
-  content: '',
-  parent_id: null as number | null,
-  is_markdown: true,
-  pinned: false,
-  color: '#fff9c4',
+const DEFAULTS = {
+  color: '#fff7b8',
+  text_color: '#1d1d1f',
+  note_opacity: 0.98,
+  font_family: 'SF Pro Text',
+  font_size: 16,
+  shadow_level: 0.22,
+  tilt_deg: 0,
 };
+
+const FONT_OPTIONS = ['SF Pro Text', 'Avenir Next', 'Menlo', 'Noteworthy'];
+const SHORTCUTS_KEY = 'ticknest.shortcuts.v1';
+const DEFAULT_SHORTCUTS: ShortcutConfig = { newNote: 'Meta+N' };
+
+function parseShortcut(value: string): string[] {
+  return value.split('+').map((p) => p.trim().toLowerCase()).filter(Boolean);
+}
+
+function eventMatchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
+  const parts = parseShortcut(shortcut);
+  const wantsMeta = parts.includes('meta') || parts.includes('cmd') || parts.includes('command');
+  const wantsCtrl = parts.includes('ctrl') || parts.includes('control');
+  const wantsShift = parts.includes('shift');
+  const wantsAlt = parts.includes('alt') || parts.includes('option');
+  if (e.metaKey !== wantsMeta || e.ctrlKey !== wantsCtrl || e.shiftKey !== wantsShift || e.altKey !== wantsAlt) return false;
+  const keyPart = parts.find((p) => !['meta', 'cmd', 'command', 'ctrl', 'control', 'shift', 'alt', 'option'].includes(p));
+  return !!keyPart && e.key.toLowerCase() === keyPart;
+}
 
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
-  const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [isPreview, setIsPreview] = useState(false);
-  const [settings, setSettings] = useState<Settings>({
-    storage_mode: 'sandbox',
-    export_include_metadata: true,
-    markdown_preview_default: true,
-  });
-  const [newNote, setNewNote] = useState(defaultNewNote);
-  const [showExport, setShowExport] = useState(false);
-  const [selectedExportIds, setSelectedExportIds] = useState<number[]>([]);
-  const [exportMode, setExportMode] = useState<'folder' | 'single_file'>('folder');
-  const [exportPath, setExportPath] = useState('');
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
   const [status, setStatus] = useState('');
-  const [draftContent, setDraftContent] = useState('');
+  const [shortcuts, setShortcuts] = useState<ShortcutConfig>(DEFAULT_SHORTCUTS);
 
-  const selectedNote = useMemo(
-    () => notes.find((n) => n.id === selectedId) ?? null,
-    [notes, selectedId],
-  );
+  const activeNote = useMemo(() => notes.find((n) => n.id === activeId) ?? null, [notes, activeId]);
 
-  const rootNotes = useMemo(() => notes.filter((n) => n.parent_id == null), [notes]);
-  const childrenByParent = useMemo(() => {
-    const map = new Map<number, Note[]>();
-    notes
-      .filter((n) => n.parent_id != null)
-      .forEach((n) => {
-        const parentId = n.parent_id as number;
-        const group = map.get(parentId) ?? [];
-        group.push(n);
-        map.set(parentId, group);
-      });
-    return map;
-  }, [notes]);
-
-  async function refreshNotes(search = query) {
-    const rows = search.trim()
-      ? await invoke<Note[]>('search_notes', { query: search })
-      : await invoke<Note[]>('list_notes');
-    setNotes(rows);
-    if (rows.length > 0 && !rows.some((n) => n.id === selectedId)) {
-      setSelectedId(rows[0].id);
-    }
-    if (rows.length === 0) setSelectedId(null);
+  async function refreshNotes() {
+    const rows = await invoke<Note[]>('list_notes');
+    const roots = rows.filter((n) => n.parent_id == null);
+    setNotes(roots);
+    if (!activeId && roots.length > 0) setActiveId(roots[0].id);
+    if (activeId && !roots.some((n) => n.id === activeId)) setActiveId(roots[0]?.id ?? null);
   }
 
-  async function loadSettings() {
-    const s = await invoke<Settings>('get_settings');
-    setSettings(s);
-    setIsPreview(!s.markdown_preview_default);
+  async function createNote() {
+    const created = await invoke<Note>('create_note', {
+      payload: {
+        parent_id: null,
+        title: `Note ${notes.length + 1}`,
+        content: '',
+        is_markdown: true,
+        pinned: false,
+        color: DEFAULTS.color,
+        text_color: DEFAULTS.text_color,
+        note_opacity: DEFAULTS.note_opacity,
+        font_family: DEFAULTS.font_family,
+        font_size: DEFAULTS.font_size,
+        shadow_level: DEFAULTS.shadow_level,
+        tilt_deg: DEFAULTS.tilt_deg,
+        pos_x: null,
+        pos_y: null,
+      },
+    });
+    setNotes((prev) => [created, ...prev]);
+    setActiveId(created.id);
+    setTitle(created.title);
+    setContent(created.content);
+    setStatus('New note created');
+  }
+
+  async function deleteActiveNote() {
+    if (!activeNote) return;
+    await invoke('delete_note', { id: activeNote.id });
+    const remaining = notes.filter((n) => n.id !== activeNote.id);
+    setNotes(remaining);
+    if (remaining.length === 0) {
+      setActiveId(null);
+      setTitle('');
+      setContent('');
+      setStatus('Note deleted');
+      await createNote();
+      return;
+    }
+    const next = remaining[0];
+    setActiveId(next.id);
+    setTitle(next.title);
+    setContent(next.content);
+    setStatus('Note deleted');
+  }
+
+  async function persist(next: Partial<Note>, nextTitle = title, nextContent = content) {
+    if (!activeNote) return;
+    const updated = await invoke<Note>('update_note', {
+      payload: {
+        id: activeNote.id,
+        parent_id: null,
+        title: nextTitle,
+        content: nextContent,
+        is_markdown: true,
+        pinned: activeNote.pinned,
+        color: next.color ?? activeNote.color ?? DEFAULTS.color,
+        text_color: next.text_color ?? activeNote.text_color ?? DEFAULTS.text_color,
+        note_opacity: next.note_opacity ?? activeNote.note_opacity ?? DEFAULTS.note_opacity,
+        font_family: next.font_family ?? activeNote.font_family ?? DEFAULTS.font_family,
+        font_size: next.font_size ?? activeNote.font_size ?? DEFAULTS.font_size,
+        shadow_level: next.shadow_level ?? activeNote.shadow_level ?? DEFAULTS.shadow_level,
+        tilt_deg: next.tilt_deg ?? activeNote.tilt_deg ?? DEFAULTS.tilt_deg,
+        pos_x: activeNote.pos_x,
+        pos_y: activeNote.pos_y,
+      },
+    });
+    setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+    setStatus('Saved');
   }
 
   useEffect(() => {
-    void refreshNotes();
-    void loadSettings();
-
-    let unlisten: (() => void) | undefined;
-    void listen('quick-note-created', () => {
-      void refreshNotes();
-    }).then((fn) => {
-      unlisten = fn;
+    void refreshNotes().then(async () => {
+      const existing = await invoke<Note[]>('list_notes');
+      if (existing.filter((n) => n.parent_id == null).length === 0) await createNote();
     });
-
-    return () => {
-      if (unlisten) unlisten();
-    };
+    const stored = localStorage.getItem(SHORTCUTS_KEY);
+    if (stored) {
+      try { setShortcuts({ ...DEFAULT_SHORTCUTS, ...JSON.parse(stored) }); } catch { setShortcuts(DEFAULT_SHORTCUTS); }
+    }
   }, []);
 
   useEffect(() => {
-    setDraftContent(selectedNote?.content ?? '');
-  }, [selectedNote?.id]);
+    if (!activeNote) return;
+    setTitle(activeNote.title);
+    setContent(activeNote.content);
+  }, [activeNote?.id]);
 
   useEffect(() => {
-    if (!selectedNote) return;
+    if (!activeNote) return;
     const timer = setTimeout(() => {
-      if (draftContent !== selectedNote.content) {
-        void saveSelected({ content: draftContent });
-      }
-    }, 350);
+      if (title !== activeNote.title || content !== activeNote.content) void persist({}, title, content);
+    }, 220);
     return () => clearTimeout(timer);
-  }, [draftContent, selectedNote?.id]);
+  }, [title, content, activeNote?.id]);
 
-  async function createNote() {
-    if (!newNote.title.trim()) return;
-    await invoke('create_note', { payload: newNote });
-    setNewNote(defaultNewNote);
-    await refreshNotes();
-  }
-
-  async function saveSelected(partial: Partial<Note>) {
-    if (!selectedNote) return;
-    const payload = {
-      id: selectedNote.id,
-      parent_id: partial.parent_id ?? selectedNote.parent_id,
-      title: partial.title ?? selectedNote.title,
-      content: partial.content ?? selectedNote.content,
-      is_markdown: partial.is_markdown ?? selectedNote.is_markdown,
-      pinned: partial.pinned ?? selectedNote.pinned,
-      color: partial.color ?? selectedNote.color,
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (eventMatchesShortcut(e, shortcuts.newNote)) {
+        e.preventDefault();
+        void createNote();
+      }
     };
-    await invoke('update_note', { payload });
-    await refreshNotes();
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [shortcuts, notes.length]);
+
+  function updateShortcut(value: string) {
+    const next = { newNote: value };
+    setShortcuts(next);
+    localStorage.setItem(SHORTCUTS_KEY, JSON.stringify(next));
+    setStatus('Shortcut updated');
   }
 
-  async function deleteSelected() {
-    if (!selectedNote) return;
-    await invoke('delete_note', { id: selectedNote.id });
-    await refreshNotes();
-  }
-
-  async function applyStorageMode() {
-    await invoke('set_storage_mode', {
-      mode: settings.storage_mode,
-      customVaultPath: settings.custom_vault_path ?? null,
-    });
-    await invoke('update_settings', { settings });
-    setStatus('Storage settings saved.');
-  }
-
-  async function doExport() {
-    try {
-      await invoke('export_notes', {
-        selection: { note_ids: selectedExportIds },
-        mode: exportMode,
-        destinationPath: exportPath,
-        options: { include_metadata: settings.export_include_metadata },
-      });
-      setShowExport(false);
-      setStatus('Export completed.');
-    } catch (error) {
-      setStatus(`Export failed: ${String(error)}`);
-    }
-  }
+  const bgColor = activeNote?.color ?? DEFAULTS.color;
+  const textColor = activeNote?.text_color ?? DEFAULTS.text_color;
+  const opacity = activeNote?.note_opacity ?? DEFAULTS.note_opacity;
+  const fontFamily = activeNote?.font_family ?? DEFAULTS.font_family;
+  const fontSize = activeNote?.font_size ?? DEFAULTS.font_size;
+  const shadowLevel = activeNote?.shadow_level ?? DEFAULTS.shadow_level;
 
   return (
-    <main className="app">
-      <aside className="sidebar">
-        <h1>TickNest</h1>
-        <input
-          className="input"
-          placeholder="Search notes"
-          value={query}
-          onChange={(e) => {
-            const value = e.target.value;
-            setQuery(value);
-            void refreshNotes(value);
-          }}
-        />
-
-        <div className="new-note">
-          <input
-            className="input"
-            placeholder="New note title"
-            value={newNote.title}
-            onChange={(e) => setNewNote((p) => ({ ...p, title: e.target.value }))}
-          />
-          <textarea
-            className="input"
-            placeholder="Quick content"
-            value={newNote.content}
-            onChange={(e) => setNewNote((p) => ({ ...p, content: e.target.value }))}
-          />
-          <select
-            className="input"
-            value={newNote.parent_id ?? ''}
-            onChange={(e) =>
-              setNewNote((p) => ({
-                ...p,
-                parent_id: e.target.value ? Number(e.target.value) : null,
-              }))
-            }
-          >
-            <option value="">Main note</option>
-            {rootNotes.map((n) => (
-              <option key={n.id} value={n.id}>
-                Child of: {n.title}
-              </option>
-            ))}
+    <main className="sticky-window" style={{ background: bgColor, color: textColor, opacity, boxShadow: `0 18px 40px rgba(0,0,0,${shadowLevel})` }}>
+      <header className="mac-menubar" data-tauri-drag-region>
+        <div className="menu-left">
+          <button className="menu-btn" onClick={() => void createNote()} title={shortcuts.newNote}>New</button>
+          <select className="menu-select" value={activeId ?? ''} onChange={(e) => setActiveId(Number(e.target.value))}>
+            {notes.map((n) => <option key={n.id} value={n.id}>{n.title || `Note ${n.id}`}</option>)}
           </select>
-          <button onClick={() => void createNote()}>Create</button>
+          <input className="menu-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
         </div>
-
-        <div className="note-list">
-          {rootNotes.map((note) => (
-            <div key={note.id}>
-              <button
-                className={`note-item ${selectedId === note.id ? 'active' : ''}`}
-                style={{ borderLeftColor: note.color ?? '#ddd' }}
-                onClick={() => setSelectedId(note.id)}
-              >
-                {note.pinned ? '📌 ' : ''}
-                {note.title}
-              </button>
-              {(childrenByParent.get(note.id) ?? []).map((child) => (
-                <button
-                  key={child.id}
-                  className={`note-item child ${selectedId === child.id ? 'active' : ''}`}
-                  onClick={() => setSelectedId(child.id)}
-                >
-                  ↳ {child.title}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      <section className="content">
-        <p className="local-only">Local-only notes. No cloud sync is used.</p>
-        <div className="toolbar">
-          <button onClick={() => setShowExport(true)}>Export</button>
-          <button onClick={() => setIsPreview((p) => !p)}>
-            {isPreview ? 'Edit' : 'Preview'}
+        <div className="menu-right">
+          <button className="menu-btn danger" onClick={() => void deleteActiveNote()} title="Delete note">
+            🗑
           </button>
-          <button onClick={() => void deleteSelected()}>Delete</button>
-          <span>{status}</span>
+          <input type="color" value={bgColor} onChange={(e) => void persist({ color: e.target.value })} />
+          <input type="color" value={textColor} onChange={(e) => void persist({ text_color: e.target.value })} />
+          <select className="menu-select" value={fontFamily} onChange={(e) => void persist({ font_family: e.target.value })}>
+            {FONT_OPTIONS.map((font) => <option key={font} value={font}>{font}</option>)}
+          </select>
+          <input className="small-range" type="range" min="13" max="26" step="1" value={fontSize} onChange={(e) => void persist({ font_size: Number(e.target.value) })} />
+          <input className="shortcut" value={shortcuts.newNote} onChange={(e) => updateShortcut(e.target.value)} title="New note shortcut" />
         </div>
+      </header>
 
-        {selectedNote ? (
-          <>
-            <input
-              className="title"
-              value={selectedNote.title}
-              onChange={(e) => void saveSelected({ title: e.target.value })}
-            />
-            <div className="row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={selectedNote.pinned}
-                  onChange={(e) => void saveSelected({ pinned: e.target.checked })}
-                />
-                Pinned
-              </label>
-              <input
-                type="color"
-                value={selectedNote.color ?? '#ffffff'}
-                onChange={(e) => void saveSelected({ color: e.target.value })}
-              />
-            </div>
-            {isPreview ? (
-              <pre className="preview">{draftContent}</pre>
-            ) : (
-              <textarea
-                className="editor"
-                value={draftContent}
-                onChange={(e) => setDraftContent(e.target.value)}
-              />
-            )}
-          </>
-        ) : (
-          <p>No note selected.</p>
-        )}
-
-        <details className="settings">
-          <summary>Settings</summary>
-          <label>
-            Storage Mode
-            <select
-              className="input"
-              value={settings.storage_mode}
-              onChange={(e) => setSettings((s) => ({ ...s, storage_mode: e.target.value }))}
-            >
-              <option value="sandbox">App sandbox</option>
-              <option value="custom_vault">Custom vault folder</option>
-            </select>
-          </label>
-          {settings.storage_mode === 'custom_vault' && (
-            <label>
-              Custom vault path
-              <input
-                className="input"
-                value={settings.custom_vault_path ?? ''}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, custom_vault_path: e.target.value }))
-                }
-                placeholder="/Users/you/Documents/TickNestVault"
-              />
-            </label>
-          )}
-          <label>
-            <input
-              type="checkbox"
-              checked={settings.export_include_metadata}
-              onChange={(e) =>
-                setSettings((s) => ({ ...s, export_include_metadata: e.target.checked }))
-              }
-            />
-            Include metadata in export
-          </label>
-          <button onClick={() => void applyStorageMode()}>Save Settings</button>
-        </details>
+      <section className="note-content">
+        <textarea className="sticky-body" style={{ color: textColor, fontFamily, fontSize: `${fontSize}px` }} value={content} onChange={(e) => setContent(e.target.value)} placeholder="Start typing..." />
       </section>
 
-      {showExport && (
-        <div className="modal">
-          <div className="modal-body">
-            <h3>Export Notes</h3>
-            <p>Select main and child notes:</p>
-            <div className="row">
-              <button
-                onClick={() =>
-                  setSelectedExportIds(rootNotes.map((n) => n.id))
-                }
-              >
-                Select all main
-              </button>
-              <button
-                onClick={() =>
-                  setSelectedExportIds(notes.filter((n) => n.parent_id != null).map((n) => n.id))
-                }
-              >
-                Select all children
-              </button>
-              <button onClick={() => setSelectedExportIds([])}>Clear</button>
-            </div>
-            {rootNotes.map((root) => (
-              <div key={root.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selectedExportIds.includes(root.id)}
-                    onChange={(e) => {
-                      setSelectedExportIds((ids) =>
-                        e.target.checked ? [...ids, root.id] : ids.filter((id) => id !== root.id),
-                      );
-                    }}
-                  />
-                  {root.title}
-                </label>
-                {(childrenByParent.get(root.id) ?? []).map((child) => (
-                  <label key={child.id} className="child-check">
-                    <input
-                      type="checkbox"
-                      checked={selectedExportIds.includes(child.id)}
-                      onChange={(e) => {
-                        setSelectedExportIds((ids) =>
-                          e.target.checked
-                            ? [...ids, child.id]
-                            : ids.filter((id) => id !== child.id),
-                        );
-                      }}
-                    />
-                    ↳ {child.title}
-                  </label>
-                ))}
-              </div>
-            ))}
-            <label>
-              Export mode
-              <select
-                className="input"
-                value={exportMode}
-                onChange={(e) => setExportMode(e.target.value as 'folder' | 'single_file')}
-              >
-                <option value="folder">One .md per note</option>
-                <option value="single_file">Single combined .md</option>
-              </select>
-            </label>
-            <label>
-              Destination path
-              <input
-                className="input"
-                value={exportPath}
-                onChange={(e) => setExportPath(e.target.value)}
-                placeholder="/Users/you/Desktop/TickNestExport"
-              />
-            </label>
-            <div className="row">
-              <button onClick={() => void doExport()}>Export</button>
-              <button onClick={() => setShowExport(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <footer className="sticky-status">{status}</footer>
     </main>
   );
 }
