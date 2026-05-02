@@ -46,6 +46,7 @@ function App() {
   const [exportMode, setExportMode] = useState<'folder' | 'single_file'>('folder');
   const [exportPath, setExportPath] = useState('');
   const [status, setStatus] = useState('');
+  const [draftContent, setDraftContent] = useState('');
 
   const selectedNote = useMemo(
     () => notes.find((n) => n.id === selectedId) ?? null,
@@ -87,6 +88,20 @@ function App() {
     void refreshNotes();
     void loadSettings();
   }, []);
+
+  useEffect(() => {
+    setDraftContent(selectedNote?.content ?? '');
+  }, [selectedNote?.id]);
+
+  useEffect(() => {
+    if (!selectedNote) return;
+    const timer = setTimeout(() => {
+      if (draftContent !== selectedNote.content) {
+        void saveSelected({ content: draftContent });
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [draftContent, selectedNote?.id]);
 
   async function createNote() {
     if (!newNote.title.trim()) return;
@@ -242,12 +257,12 @@ function App() {
               />
             </div>
             {isPreview ? (
-              <pre className="preview">{selectedNote.content}</pre>
+              <pre className="preview">{draftContent}</pre>
             ) : (
               <textarea
                 className="editor"
-                value={selectedNote.content}
-                onChange={(e) => void saveSelected({ content: e.target.value })}
+                value={draftContent}
+                onChange={(e) => setDraftContent(e.target.value)}
               />
             )}
           </>
