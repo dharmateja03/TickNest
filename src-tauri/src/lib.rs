@@ -323,7 +323,9 @@ fn set_storage_mode(
     custom_vault_path: Option<String>,
 ) -> Result<(), String> {
     let next_path = if mode == "custom_vault" {
-        let custom = custom_vault_path.ok_or_else(|| "custom_vault_path required".to_string())?;
+        let custom = custom_vault_path
+            .clone()
+            .ok_or_else(|| "custom_vault_path required".to_string())?;
         let dir = Path::new(&custom);
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         dir.join("ticknest.db")
