@@ -153,14 +153,18 @@ function App() {
   }
 
   async function doExport() {
-    await invoke('export_notes', {
-      selection: { note_ids: selectedExportIds },
-      mode: exportMode,
-      destinationPath: exportPath,
-      options: { include_metadata: settings.export_include_metadata },
-    });
-    setShowExport(false);
-    setStatus('Export completed.');
+    try {
+      await invoke('export_notes', {
+        selection: { note_ids: selectedExportIds },
+        mode: exportMode,
+        destinationPath: exportPath,
+        options: { include_metadata: settings.export_include_metadata },
+      });
+      setShowExport(false);
+      setStatus('Export completed.');
+    } catch (error) {
+      setStatus(`Export failed: ${String(error)}`);
+    }
   }
 
   return (
@@ -327,6 +331,23 @@ function App() {
           <div className="modal-body">
             <h3>Export Notes</h3>
             <p>Select main and child notes:</p>
+            <div className="row">
+              <button
+                onClick={() =>
+                  setSelectedExportIds(rootNotes.map((n) => n.id))
+                }
+              >
+                Select all main
+              </button>
+              <button
+                onClick={() =>
+                  setSelectedExportIds(notes.filter((n) => n.parent_id != null).map((n) => n.id))
+                }
+              >
+                Select all children
+              </button>
+              <button onClick={() => setSelectedExportIds([])}>Clear</button>
+            </div>
             {rootNotes.map((root) => (
               <div key={root.id}>
                 <label>
