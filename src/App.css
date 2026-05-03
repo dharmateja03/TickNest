@@ -19,6 +19,7 @@ body {
 }
 
 .sticky-window {
+  position: relative;
   width: 100%;
   height: 100%;
   display: grid;
@@ -27,6 +28,37 @@ body {
   border-radius: 14px;
   overflow: hidden;
   background: #f4f4f6;
+}
+
+.confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 999;
+}
+
+.confetti-piece {
+  position: fixed;
+  width: 8px;
+  height: 12px;
+  left: var(--x);
+  top: var(--y);
+  background: var(--color);
+  border-radius: 1px;
+  animation: confetti-fall 1.2s ease-out forwards;
+  animation-delay: var(--delay);
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--dx), 210px) rotate(var(--rot));
+    opacity: 0;
+  }
 }
 
 .mac-menubar {
@@ -99,6 +131,7 @@ input[type='color'] {
 }
 
 .note-card {
+  position: relative;
   flex: 0 0 340px;
   height: calc(100% - 4px);
   min-height: 260px;
@@ -106,6 +139,32 @@ input[type='color'] {
   border-radius: 12px;
   display: grid;
   grid-template-rows: auto 1fr;
+}
+
+.delete-note {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.14);
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.note-card:hover .delete-note,
+.note-card.active .delete-note {
+  opacity: 1;
+}
+
+.delete-note:hover {
+  background: rgba(255, 59, 48, 0.24);
 }
 
 .note-card.active {

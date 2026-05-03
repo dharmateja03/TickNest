@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import './App.css';
@@ -23,6 +23,16 @@ type Note = {
   updated_at: string;
 };
 
+type ConfettiPiece = {
+  id: number;
+  x: number;
+  y: number;
+  dx: number;
+  rot: number;
+  color: string;
+  delay: number;
+};
+
 const DEFAULTS = {
   color: '#fff7b8',
   text_color: '#1d1d1f',
@@ -34,12 +44,14 @@ const DEFAULTS = {
 };
 
 const FONT_OPTIONS = ['SF Pro Text', 'Avenir Next', 'Menlo', 'Noteworthy'];
+const CONFETTI_COLORS = ['#ff595e', '#ffca3a', '#8ac926', '#1982c4', '#ff7eb6', '#6a4c93'];
 
 function App() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [status, setStatus] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [confetti, setConfetti] = useState<ConfettiPiece[]>([]);
 
   const activeNote = useMemo(() => notes.find((n) => n.id === activeId) ?? null, [notes, activeId]);
 
@@ -99,6 +111,35 @@ function App() {
 
     setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
     setStatus('Saved');
+  }
+
+  function burstConfetti(x: number, y: number) {
+    const pieces: ConfettiPiece[] = Array.from({ length: 32 }, (_, idx) => ({
+      id: Date.now() + idx,
+      x,
+      y,
+      dx: Math.random() * 220 - 110,
+      rot: Math.random() * 360,
+      color: CONFETTI_COLORS[idx % CONFETTI_COLORS.length],
+      delay: Math.random() * 80,
+    }));
+    setConfetti((prev) => [...prev, ...pieces]);
+    window.setTimeout(() => {
+      setConfetti((prev) => prev.filter((p) => !pieces.some((c) => c.id === p.id)));
+    }, 1300);
+  }
+
+  async function deleteNote(noteId: number, e?: MouseEvent<HTMLElement>) {
+    const burstX = e?.clientX ?? window.innerWidth / 2;
+    const burstY = e?.clientY ?? window.innerHeight / 2;
+    await invoke('delete_note', { id: noteId });
+    setNotes((prev) => {
+      const remaining = prev.filter((n) => n.id !== noteId);
+      setActiveId((current) => (current === noteId ? (remaining[0]?.id ?? null) : current));
+      return remaining;
+    });
+    burstConfetti(burstX, burstY);
+    setStatus('Note deleted');
   }
 
   function goPrevNote() {
@@ -172,6 +213,24 @@ function App() {
 
   return (
     <main className="sticky-window">
+      <div className="confetti-layer" aria-hidden="true">
+        {confetti.map((piece) => (
+          <span
+            key={piece.id}
+            className="confetti-piece"
+            style={
+              {
+                '--x': `${piece.x}px`,
+                '--y': `${piece.y}px`,
+                '--dx': `${piece.dx}px`,
+                '--rot': `${piece.rot}deg`,
+                '--color': piece.color,
+                '--delay': `${piece.delay}ms`,
+              } as CSSProperties
+            }
+          />
+        ))}
+      </div>
       <header className="mac-menubar" data-tauri-drag-region>
         <div className="menu-left">
           <span className="menu-title">Sticky Notes</span>
@@ -213,6 +272,17 @@ function App() {
               }}
               onClick={() => setActiveId(note.id)}
             >
+              <button
+                className="delete-note"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void deleteNote(note.id, e);
+                }}
+                title="Delete note"
+              >
+                ×
+              </button>
               <input
                 className="note-title"
                 value={note.title}
